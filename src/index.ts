@@ -130,7 +130,8 @@ function applyPruneRules(messages: MessageWithParts[]) {
       }
 
       if (!rule.lines.length) {
-        return []
+        part.state.output = ""
+        return [part]
       }
 
       part.state.output = pruneLines(part.state.output, rule.lines)
