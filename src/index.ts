@@ -45,6 +45,7 @@ export const plugin: Plugin = async (input) => ({
         indices: tool.schema
           .array(tool.schema.number().int().min(0))
           .min(1)
+          .optional()
           .describe(
             "0-based indices of completed tool calls from the immediately preceding tool batch to prune. 0 means the first tool call in that batch by position (order started, not order finished).",
           ),
@@ -64,6 +65,10 @@ export const plugin: Plugin = async (input) => ({
           rulesBySession.delete(context.sessionID)
           clearStoredPrunedCalls(context.sessionID)
           return ""
+        }
+
+        if (!args.indices?.length) {
+          return "nocreep: provide at least one tool call index or set clear=true."
         }
 
         const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
