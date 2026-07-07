@@ -20,23 +20,30 @@ type CompletedToolPart = Extract<Part, { type: "tool" }> & {
   state: Extract<Extract<Part, { type: "tool" }>["state"], { status: "completed" }>
 }
 
+type IndexedCompletedToolPart = CompletedToolPart & {
+  batchIndex: number
+  pruneIndex: number
+}
+
 const rulesBySession = new Map<string, PruneRule[]>()
 
 export const plugin: Plugin = async (input) => ({
   tool: {
     nocreep: tool({
       description:
-        "Prune prior tool outputs from future context. Always use proactively immediately after tool outputs unless every line of all those outputs is still needed for future reasoning. Provide call IDs from the tool calls that happened immediately before this nocreep call. Omit lines, pass an empty lines array, or pass an empty array for a specific call ID to drop that whole output; otherwise pass one nested line-selector array per call ID to prune only those lines.",
+        "Prune prior tool outputs from future context. Always use immediately after any tool outputs unless there is absolutely nothing to remove because every line of all those outputs is still needed for future reasoning. After tool calls finish, call nocreep before continuing whenever any output or output line can be discarded. Never just continue after tool outputs unless all of every output must remain in context. Do not leave prior tool outputs in context if any part of them is unnecessary for the next reasoning step. Provide 0-based indices of the completed tool calls from the immediately preceding tool batch, where 0 is the first tool call in that batch by position (the order they were started, not the order they finished). Omit lines, pass an empty lines array, or pass an empty array for a specific index to drop that whole output; otherwise pass one nested line-selector array per index to prune only those lines.",
       args: {
-        call_ids: tool.schema
-          .array(tool.schema.string())
+        indices: tool.schema
+          .array(tool.schema.number().int().min(0))
           .min(1)
-          .describe("Specific call IDs from the immediately preceding completed tool calls to prune."),
+          .describe(
+            "0-based indices of completed tool calls from the immediately preceding tool batch to prune. 0 means the first tool call in that batch by position (order started, not order finished).",
+          ),
         lines: tool.schema
           .array(tool.schema.array(tool.schema.union([tool.schema.number().int().min(1), tool.schema.string()])))
           .optional()
           .describe(
-            'Optional nested 1-based output lines or ranges to remove, one array per call_id, for example [[5, "10-25"], []]. Omit lines, pass [], or pass [] for a call_id to prune the whole output.',
+            'Optional nested 1-based output lines or ranges to remove, one array per index, for example [[5, "10-25"], []]. Omit lines, pass [], or pass [] for an index to prune the whole output.',
           ),
         clear: tool.schema
           .boolean()
@@ -50,7 +57,7 @@ export const plugin: Plugin = async (input) => ({
         }
 
         const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
-        const selected = selectCompletedToolParts(messages, args.call_ids)
+        const selected = selectCompletedToolParts(messages, args.indices)
 
         if (selected.length === 0) {
           return "nocreep: no completed tool calls matched."
@@ -62,7 +69,7 @@ export const plugin: Plugin = async (input) => ({
           selected.map((part) => ({
             sessionID: context.sessionID,
             callID: part.callID,
-            lines: getLinesForCallID(args.call_ids, args.lines ?? [], part.callID),
+            lines: getLinesForPart(args.lines ?? [], part),
             created: Date.now(),
           })),
         )
@@ -130,20 +137,17 @@ async function getSessionMessages(
   return response.data ?? []
 }
 
-function selectCompletedToolParts(messages: MessageWithParts[], callIDs: string[]) {
+function selectCompletedToolParts(messages: MessageWithParts[], indices: number[]) {
   const completed =
     messages.findLast((message) => message.parts.some(isCompletedToolPart))?.parts.filter(isCompletedToolPart) ?? []
-  const wanted = new Set(callIDs)
-  return completed.filter((part) => wanted.has(part.callID))
+  return indices.flatMap((batchIndex, pruneIndex) => {
+    const part = completed[batchIndex]
+    return part ? [{ ...part, batchIndex, pruneIndex }] : []
+  })
 }
 
-function getLinesForCallID(callIDs: string[], lines: LineSelector[][], callID: string) {
-  const index = callIDs.indexOf(callID)
-  if (index < 0) {
-    return []
-  }
-
-  return normalizeLines(lines[index] ?? [])
+function getLinesForPart(lines: LineSelector[][], part: IndexedCompletedToolPart) {
+  return normalizeLines(lines[part.pruneIndex] ?? [])
 }
 
 function mergeRules(existing: PruneRule[], next: PruneRule[]) {
