@@ -1,6 +1,6 @@
 {
   "name": "nocreep",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "opencode tool plugin for pruning previous tool outputs from future model context, avoiding context creep.",
   "author": {
     "name": "Linus Schlumberger",
