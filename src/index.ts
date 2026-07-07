@@ -26,28 +26,17 @@ export const plugin: Plugin = async (input) => ({
   tool: {
     nocreep: tool({
       description:
-        "Prune prior tool outputs from future context. Use proactively immediately after any tool outputs if any number of lines or tool outputs are not needed. If a tool result was only needed to answer the current step, call nocreep before continuing. Supports last calls, last parallel batch, call IDs, and line/range pruning.",
+        "Prune prior tool outputs from future context. Always use proactively immediately after tool outputs unless every line of all those outputs is still needed for future reasoning. Provide call IDs from the tool calls that happened immediately before this nocreep call. Omit lines, pass an empty lines array, or pass an empty array for a specific call ID to drop that whole output; otherwise pass one nested line-selector array per call ID to prune only those lines.",
       args: {
-        last: tool.schema
-          .number()
-          .int()
+        call_ids: tool.schema
+          .array(tool.schema.string())
           .min(1)
-          .optional()
-          .describe(
-            "Number of most recent completed tool calls to prune. Defaults to 1 when call_ids and parallel_last are omitted.",
-          ),
-        parallel_last: tool.schema
-          .boolean()
-          .optional()
-          .describe(
-            "Prune every completed tool call in the most recent assistant message that contains completed tool calls. Prefer this after any parallel tool batch whose outputs are no longer needed.",
-          ),
-        call_ids: tool.schema.array(tool.schema.string()).optional().describe("Specific tool call IDs to prune."),
+          .describe("Specific call IDs from the immediately preceding completed tool calls to prune."),
         lines: tool.schema
-          .array(tool.schema.union([tool.schema.number().int().min(1), tool.schema.string()]))
+          .array(tool.schema.array(tool.schema.union([tool.schema.number().int().min(1), tool.schema.string()])))
           .optional()
           .describe(
-            'Optional 1-based output lines or ranges to remove, for example 5 or "10-25". Omit to prune the whole selected output.',
+            'Optional nested 1-based output lines or ranges to remove, one array per call_id, for example [[5, "10-25"], []]. Omit lines, pass [], or pass [] for a call_id to prune the whole output.',
           ),
         clear: tool.schema
           .boolean()
@@ -61,24 +50,19 @@ export const plugin: Plugin = async (input) => ({
         }
 
         const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
-        const selected = selectCompletedToolParts(messages, {
-          callIDs: args.call_ids ?? [],
-          last: args.last,
-          parallelLast: args.parallel_last ?? false,
-        })
+        const selected = selectCompletedToolParts(messages, args.call_ids)
 
         if (selected.length === 0) {
           return "nocreep: no completed tool calls matched."
         }
 
         const existing = rulesBySession.get(context.sessionID) ?? []
-        const lines = normalizeLines(args.lines ?? [])
         const next = mergeRules(
           existing,
           selected.map((part) => ({
             sessionID: context.sessionID,
             callID: part.callID,
-            lines,
+            lines: getLinesForCallID(args.call_ids, args.lines ?? [], part.callID),
             created: Date.now(),
           })),
         )
@@ -146,24 +130,20 @@ async function getSessionMessages(
   return response.data ?? []
 }
 
-function selectCompletedToolParts(
-  messages: MessageWithParts[],
-  options: { callIDs: string[]; last?: number; parallelLast: boolean },
-) {
-  const completed = messages.flatMap((message) => message.parts.filter(isCompletedToolPart))
+function selectCompletedToolParts(messages: MessageWithParts[], callIDs: string[]) {
+  const completed =
+    messages.findLast((message) => message.parts.some(isCompletedToolPart))?.parts.filter(isCompletedToolPart) ?? []
+  const wanted = new Set(callIDs)
+  return completed.filter((part) => wanted.has(part.callID))
+}
 
-  if (options.callIDs.length) {
-    const wanted = new Set(options.callIDs)
-    return completed.filter((part) => wanted.has(part.callID))
+function getLinesForCallID(callIDs: string[], lines: LineSelector[][], callID: string) {
+  const index = callIDs.indexOf(callID)
+  if (index < 0) {
+    return []
   }
 
-  if (options.parallelLast) {
-    return (
-      messages.findLast((message) => message.parts.some(isCompletedToolPart))?.parts.filter(isCompletedToolPart) ?? []
-    )
-  }
-
-  return completed.slice(-(options.last ?? 1))
+  return normalizeLines(lines[index] ?? [])
 }
 
 function mergeRules(existing: PruneRule[], next: PruneRule[]) {
