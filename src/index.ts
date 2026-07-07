@@ -26,7 +26,7 @@ export const plugin: Plugin = async (input) => ({
   tool: {
     nocreep: tool({
       description:
-        "Prune prior tool outputs from future context. Always use proactively for tool outputs you no longer need. Supports last calls, last parallel batch, call IDs, and line/range pruning.",
+        "Prune prior tool outputs from future context. Use proactively immediately after any tool outputs if any number of lines or tool outputs are not needed. If a tool result was only needed to answer the current step, call nocreep before continuing. Supports last calls, last parallel batch, call IDs, and line/range pruning.",
       args: {
         last: tool.schema
           .number()
@@ -40,7 +40,7 @@ export const plugin: Plugin = async (input) => ({
           .boolean()
           .optional()
           .describe(
-            "Prune every completed tool call in the most recent assistant message that contains completed tool calls.",
+            "Prune every completed tool call in the most recent assistant message that contains completed tool calls. Prefer this after any parallel tool batch whose outputs are no longer needed.",
           ),
         call_ids: tool.schema.array(tool.schema.string()).optional().describe("Specific tool call IDs to prune."),
         lines: tool.schema
