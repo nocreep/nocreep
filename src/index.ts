@@ -1,5 +1,4 @@
-import type { Message, Part } from "@opencode-ai/sdk"
-import { createOpencodeClient } from "@opencode-ai/sdk"
+import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 
@@ -23,7 +22,7 @@ type CompletedToolPart = Extract<Part, { type: "tool" }> & {
 
 const rulesBySession = new Map<string, PruneRule[]>()
 
-export const plugin: Plugin = async () => ({
+export const plugin: Plugin = async (input) => ({
   tool: {
     nocreep: tool({
       description:
@@ -61,7 +60,7 @@ export const plugin: Plugin = async () => ({
           return "nocreep: cleared prune rules for this session."
         }
 
-        const messages = await getSessionMessages(context.sessionID, context.directory)
+        const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
         const selected = selectCompletedToolParts(messages, {
           callIDs: args.call_ids ?? [],
           last: args.last,
@@ -113,7 +112,7 @@ export const plugin: Plugin = async () => ({
 
 export default plugin
 
-export function applyPruneRules(messages: MessageWithParts[]) {
+function applyPruneRules(messages: MessageWithParts[]) {
   const sessionID = messages.find((message) => message.info.sessionID)?.info.sessionID
   if (!sessionID) {
     return
@@ -147,8 +146,12 @@ export function applyPruneRules(messages: MessageWithParts[]) {
   })
 }
 
-async function getSessionMessages(sessionID: string, directory: string): Promise<MessageWithParts[]> {
-  const response = await createOpencodeClient({ directory }).session.messages({
+async function getSessionMessages(
+  client: OpencodeClient,
+  sessionID: string,
+  directory: string,
+): Promise<MessageWithParts[]> {
+  const response = await client.session.messages({
     path: { id: sessionID },
     query: { directory },
   })
