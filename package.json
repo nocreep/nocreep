@@ -6,6 +6,10 @@
     "name": "Linus Schlumberger",
     "email": "l@mll.one"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nocreep/nocreep"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
