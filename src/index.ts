@@ -57,7 +57,7 @@ export const plugin: Plugin = async (input) => ({
       async execute(args, context) {
         if (args.clear) {
           rulesBySession.delete(context.sessionID)
-          return "nocreep: cleared prune rules for this session."
+          return ""
         }
 
         const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
@@ -84,36 +84,19 @@ export const plugin: Plugin = async (input) => ({
         )
         rulesBySession.set(context.sessionID, next)
 
-        return `nocreep: pruning ${selected.length} tool output${selected.length === 1 ? "" : "s"} from future model context${lines.length ? ` (line${lines.length === 1 ? "" : "s"} ${formatLineSummary(lines)})` : ""}.`
+        return ""
       },
     }),
   },
   "experimental.chat.messages.transform": async (_input, output) => {
     applyPruneRules(output.messages)
   },
-  "tool.execute.after": async (input) => {
-    if (input.tool !== "nocreep") {
-      return
-    }
-
-    rulesBySession.set(
-      input.sessionID,
-      mergeRules(rulesBySession.get(input.sessionID) ?? [], [
-        {
-          sessionID: input.sessionID,
-          callID: input.callID,
-          lines: [],
-          created: Date.now(),
-        },
-      ]),
-    )
-  },
 })
 
 export default plugin
 
 function applyPruneRules(messages: MessageWithParts[]) {
-  const sessionID = messages.find((message) => message.info.sessionID)?.info.sessionID
+  const sessionID = getSessionID(messages)
   if (!sessionID) {
     return
   }
@@ -144,6 +127,10 @@ function applyPruneRules(messages: MessageWithParts[]) {
       return [part]
     })
   })
+}
+
+function getSessionID(messages: MessageWithParts[]) {
+  return messages.find((message) => message.info.sessionID)?.info.sessionID
 }
 
 async function getSessionMessages(
@@ -235,8 +222,4 @@ function expandLineSelector(selector: LineSelector) {
   }
 
   return []
-}
-
-function formatLineSummary(lines: number[]) {
-  return lines.join(", ")
 }
