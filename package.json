@@ -1,0 +1,38 @@
+{
+  "name": "nocreep",
+  "version": "0.1.0",
+  "description": "opencode tool plugin for pruning previous tool outputs from future model context, avoiding context creep.",
+  "author": {
+    "name": "Linus Schlumberger",
+    "email": "l@mll.one"
+  },
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write ."
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.4.0",
+    "@opencode-ai/sdk": ">=1.4.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.17.14",
+    "@opencode-ai/sdk": "^1.17.14",
+    "@types/node": "^22.13.9",
+    "prettier": "^3.6.2",
+    "typescript": "^5.8.2"
+  }
+}
