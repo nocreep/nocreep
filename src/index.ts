@@ -1,7 +1,14 @@
 import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
-import { clearStoredPrunedCalls, loadStoredPrunedCalls, removeStoredPrunedCalls, storePrunedCalls } from "./storage.js"
+import {
+  clearStoredPrunedCalls,
+  estimateTokens,
+  loadStoredPrunedCalls,
+  recordStats,
+  removeStoredPrunedCalls,
+  storePrunedCalls,
+} from "./storage.js"
 
 type MessageWithParts = {
   info: Message
@@ -79,6 +86,12 @@ export const plugin: Plugin = async (input) => ({
           context.sessionID,
           next.map(({ callID, lines, created }) => ({ callID, lines, created })),
         )
+
+        const tokensSaved = nextRules.reduce(
+          (total, rule) => total + estimateTokens(getRemovedOutput(selected, rule.callID, rule.lines)),
+          0,
+        )
+        recordStats(context.sessionID, tokensSaved)
 
         return ""
       },
@@ -185,6 +198,23 @@ function mergeRules(existing: PruneRule[], next: PruneRule[]) {
 
     return rules.map((item, itemIndex) => (itemIndex === index ? rule : item))
   }, [])
+}
+
+function getRemovedOutput(parts: IndexedCompletedToolPart[], callID: string, lines: number[]) {
+  const part = parts.find((item) => item.callID === callID)
+  if (!part) {
+    return ""
+  }
+
+  if (!lines.length) {
+    return part.state.output
+  }
+
+  const selected = new Set(lines)
+  return part.state.output
+    .split("\n")
+    .filter((_line, index) => selected.has(index + 1))
+    .join("\n")
 }
 
 function pruneLines(output: string, lines: number[]) {

@@ -8,9 +8,23 @@ export type StoredPrunedCall = {
   created: number
 }
 
+type SessionStats = {
+  sessionID: string
+  tokensSaved: number
+  updatedAtUtc: string
+}
+
+type TimestampStats = {
+  sessionID: string
+  tokensSaved: number
+  timestampUtc: string
+}
+
 const appName = "nocreep"
 const stateDir = getStateDir()
 const prunedCallsDir = path.join(stateDir, "pruned-calls")
+const sessionsStatsFile = path.join(stateDir, "stats-sessions.json")
+const timestampsStatsFile = path.join(stateDir, "stats-timestamps.json")
 
 let writeQueue = Promise.resolve()
 
@@ -35,6 +49,39 @@ export const removeStoredPrunedCalls = (sessionID: string) => {
 
 export const loadStoredPrunedCalls = async (sessionID: string) =>
   readJsonFile<StoredPrunedCall[]>(getPrunedCallsFile(sessionID), [])
+
+export const recordStats = (sessionID: string, tokensSaved: number) => {
+  if (tokensSaved <= 0) {
+    return
+  }
+
+  scheduleWrite(async () => {
+    await fs.mkdir(stateDir, { recursive: true })
+    const now = new Date().toISOString()
+    const sessions = await readJsonFile<SessionStats[]>(sessionsStatsFile, [])
+    const timestamps = await readJsonFile<TimestampStats[]>(timestampsStatsFile, [])
+    const sessionIndex = sessions.findIndex((session) => session.sessionID === sessionID)
+    const nextSession = {
+      sessionID,
+      tokensSaved: tokensSaved + (sessions[sessionIndex]?.tokensSaved ?? 0),
+      updatedAtUtc: now,
+    }
+    const nextSessions = sessionIndex < 0 ? [...sessions, nextSession] : sessions.with(sessionIndex, nextSession)
+
+    await fs.writeFile(sessionsStatsFile, `${JSON.stringify(nextSessions)}\n`)
+    await fs.writeFile(
+      timestampsStatsFile,
+      `${JSON.stringify([...timestamps, { sessionID, tokensSaved, timestampUtc: now }])}\n`,
+    )
+  })
+}
+
+export const readStats = async () => ({
+  sessions: await readJsonFile<SessionStats[]>(sessionsStatsFile, []),
+  timestamps: await readJsonFile<TimestampStats[]>(timestampsStatsFile, []),
+})
+
+export const estimateTokens = (text: string) => Math.ceil(text.length / 4)
 
 const getPrunedCallsFile = (sessionID: string) => path.join(prunedCallsDir, `${encodeURIComponent(sessionID)}.json`)
 
