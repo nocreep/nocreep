@@ -1,6 +1,7 @@
 import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
+import { clearStoredPrunedCalls, loadStoredPrunedCalls, removeStoredPrunedCalls, storePrunedCalls } from "./storage.js"
 
 type MessageWithParts = {
   info: Message
@@ -26,6 +27,7 @@ type IndexedCompletedToolPart = CompletedToolPart & {
 }
 
 const rulesBySession = new Map<string, PruneRule[]>()
+const loadedSessions = new Set<string>()
 
 export const plugin: Plugin = async (input) => ({
   tool: {
@@ -53,6 +55,7 @@ export const plugin: Plugin = async (input) => ({
       async execute(args, context) {
         if (args.clear) {
           rulesBySession.delete(context.sessionID)
+          clearStoredPrunedCalls(context.sessionID)
           return ""
         }
 
@@ -64,22 +67,25 @@ export const plugin: Plugin = async (input) => ({
         }
 
         const existing = rulesBySession.get(context.sessionID) ?? []
-        const next = mergeRules(
-          existing,
-          selected.map((part) => ({
-            sessionID: context.sessionID,
-            callID: part.callID,
-            lines: getLinesForPart(args.lines ?? [], part),
-            created: Date.now(),
-          })),
-        )
+        const nextRules = selected.map((part) => ({
+          sessionID: context.sessionID,
+          callID: part.callID,
+          lines: getLinesForPart(args.lines ?? [], part),
+          created: Date.now(),
+        }))
+        const next = mergeRules(existing, nextRules)
         rulesBySession.set(context.sessionID, next)
+        storePrunedCalls(
+          context.sessionID,
+          next.map(({ callID, lines, created }) => ({ callID, lines, created })),
+        )
 
         return ""
       },
     }),
   },
   "experimental.chat.messages.transform": async (_input, output) => {
+    await loadSessionRules(output.messages)
     applyPruneRules(output.messages)
   },
 })
@@ -118,6 +124,26 @@ function applyPruneRules(messages: MessageWithParts[]) {
       return [part]
     })
   })
+}
+
+async function loadSessionRules(messages: MessageWithParts[]) {
+  const sessionID = getSessionID(messages)
+  if (!sessionID || loadedSessions.has(sessionID)) {
+    return
+  }
+
+  const calls = await loadStoredPrunedCalls(sessionID)
+  if (calls.length) {
+    rulesBySession.set(
+      sessionID,
+      mergeRules(
+        rulesBySession.get(sessionID) ?? [],
+        calls.map((call) => ({ sessionID, ...call })),
+      ),
+    )
+  }
+  loadedSessions.add(sessionID)
+  removeStoredPrunedCalls(sessionID)
 }
 
 function getSessionID(messages: MessageWithParts[]) {
