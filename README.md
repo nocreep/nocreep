@@ -19,6 +19,8 @@ Add `nocreep` to your opencode config:
 
 Restart opencode. It will install and load the npm plugin automatically.
 
+Show token savings stats with `npx -y nocreep --stats`.
+
 References: [opencode plugins](https://opencode.ai/docs/plugins)
 
 ## License
