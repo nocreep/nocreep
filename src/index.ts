@@ -2,7 +2,6 @@ import type { Message, OpencodeClient, Part } from "@opencode-ai/sdk"
 import type { Plugin } from "@opencode-ai/plugin"
 import { tool } from "@opencode-ai/plugin"
 import {
-  clearStoredPrunedCalls,
   estimateTokens,
   hasRecordedStats,
   loadStoredPrunedCalls,
@@ -58,18 +57,8 @@ export const plugin: Plugin = async (input) => ({
           .describe(
             'Optional nested 1-based output lines or ranges to remove, one array per index, for example [[5, "10-25"], []]. Omit lines, pass [], or pass [] for an index to prune the whole output.',
           ),
-        clear: tool.schema
-          .boolean()
-          .optional()
-          .describe("Clear nocreep prune rules for this session instead of adding rules."),
       },
       async execute(args, context) {
-        if (args.clear) {
-          rulesBySession.delete(context.sessionID)
-          clearStoredPrunedCalls(context.sessionID)
-          return ""
-        }
-
         const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
         const selected = selectCompletedToolParts(messages, args.indices)
 

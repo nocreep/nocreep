@@ -35,12 +35,6 @@ export const storePrunedCalls = (sessionID: string, calls: StoredPrunedCall[]) =
   })
 }
 
-export const clearStoredPrunedCalls = (sessionID: string) => {
-  scheduleWrite(async () => {
-    await removeFile(getPrunedCallsFile(sessionID))
-  })
-}
-
 export const removeStoredPrunedCalls = (sessionID: string) => {
   scheduleWrite(async () => {
     await removeFile(getPrunedCallsFile(sessionID))
