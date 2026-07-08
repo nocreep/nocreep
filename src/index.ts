@@ -37,6 +37,7 @@ const rulesBySession = new Map<string, PruneRule[]>()
 const loadedSessions = new Set<string>()
 const sessionsWithInstructionOverhead = new Set<string>()
 const toolCallOverheadTokens = 12
+const prunedOutputPlaceholder = "pruned"
 const nocreepDescription =
   "Prune prior tool outputs from future context. Once you prune output, you will not be able to see it or remember it in future turns. Prune only results and parts of results you will not need. Keep exact evidence, file contents, error text, and command output that you still need for reasoning, citations, edits, or the final answer. Once pruned, the removed output is gone from your future context, so only prune lines you are certain you no longer need. Always use immediately after any tool outputs unless there is absolutely nothing to remove because every line of all those outputs is still needed for future reasoning. After tool calls finish, call nocreep before continuing whenever any output or output line can be discarded. Never just continue after tool outputs unless all of every output must remain in context. Do not leave prior tool outputs in context if any part of them is unnecessary for the next reasoning step. Provide 0-based indices of the completed tool calls from the immediately preceding tool batch, where 0 is the first tool call in that batch by position (the order they were started, not the order they finished). Omit lines, pass an empty lines array, or pass an empty array for a specific index to drop the whole output; otherwise pass one nested line-selector array per index to prune only those lines. Remember: after pruning, you cannot inspect or rely on the removed output again."
 
@@ -81,7 +82,7 @@ export const plugin: Plugin = async (input) => ({
         )
 
         const grossTokensSaved = nextRules.reduce(
-          (total, rule) => total + estimateTokens(getRemovedOutput(selected, rule.callID, rule.lines)),
+          (total, rule) => total + getRuleTokensSaved(selected, rule.callID, rule.lines),
           0,
         )
         const overheadTokens = await getOverheadTokens(context.sessionID, {
@@ -142,7 +143,7 @@ function applyPruneRules(messages: MessageWithParts[]) {
       }
 
       if (!rule.lines.length) {
-        part.state.output = ""
+        part.state.output = prunedOutputPlaceholder
         return [part]
       }
 
@@ -228,6 +229,12 @@ function getRemovedOutput(parts: IndexedCompletedToolPart[], callID: string, lin
     .split("\n")
     .filter((_line, index) => selected.has(index + 1))
     .join("\n")
+}
+
+function getRuleTokensSaved(parts: IndexedCompletedToolPart[], callID: string, lines: number[]) {
+  const removedOutput = getRemovedOutput(parts, callID, lines)
+  const placeholderTokens = lines.length ? 0 : estimateTokens(prunedOutputPlaceholder)
+  return estimateTokens(removedOutput) - placeholderTokens
 }
 
 function pruneLines(output: string, lines: number[]) {
