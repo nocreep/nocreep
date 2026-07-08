@@ -4,6 +4,7 @@ import { tool } from "@opencode-ai/plugin"
 import {
   clearStoredPrunedCalls,
   estimateTokens,
+  hasRecordedStats,
   loadStoredPrunedCalls,
   recordStats,
   removeStoredPrunedCalls,
@@ -35,12 +36,15 @@ type IndexedCompletedToolPart = CompletedToolPart & {
 
 const rulesBySession = new Map<string, PruneRule[]>()
 const loadedSessions = new Set<string>()
+const sessionsWithInstructionOverhead = new Set<string>()
+const toolCallOverheadTokens = 12
+const nocreepDescription =
+  "Prune prior tool outputs from future context. Always use immediately after any tool outputs unless there is absolutely nothing to remove because every line of all those outputs is still needed for future reasoning. After tool calls finish, call nocreep before continuing whenever any output or output line can be discarded. Never just continue after tool outputs unless all of every output must remain in context. Do not leave prior tool outputs in context if any part of them is unnecessary for the next reasoning step. Provide 0-based indices of the completed tool calls from the immediately preceding tool batch, where 0 is the first tool call in that batch by position (the order they were started, not the order they finished). Omit lines, pass an empty lines array, or pass an empty array for a specific index to drop that whole output; otherwise pass one nested line-selector array per index to prune only those lines."
 
 export const plugin: Plugin = async (input) => ({
   tool: {
     nocreep: tool({
-      description:
-        "Prune prior tool outputs from future context. Always use immediately after any tool outputs unless there is absolutely nothing to remove because every line of all those outputs is still needed for future reasoning. After tool calls finish, call nocreep before continuing whenever any output or output line can be discarded. Never just continue after tool outputs unless all of every output must remain in context. Do not leave prior tool outputs in context if any part of them is unnecessary for the next reasoning step. Provide 0-based indices of the completed tool calls from the immediately preceding tool batch, where 0 is the first tool call in that batch by position (the order they were started, not the order they finished). Omit lines, pass an empty lines array, or pass an empty array for a specific index to drop that whole output; otherwise pass one nested line-selector array per index to prune only those lines.",
+      description: nocreepDescription,
       args: {
         indices: tool.schema
           .array(tool.schema.number().int().min(0))
@@ -87,10 +91,15 @@ export const plugin: Plugin = async (input) => ({
           next.map(({ callID, lines, created }) => ({ callID, lines, created })),
         )
 
-        const tokensSaved = nextRules.reduce(
+        const grossTokensSaved = nextRules.reduce(
           (total, rule) => total + estimateTokens(getRemovedOutput(selected, rule.callID, rule.lines)),
           0,
         )
+        const overheadTokens = await getOverheadTokens(context.sessionID, {
+          indices: args.indices,
+          ...(args.lines ? { lines: args.lines } : {}),
+        })
+        const tokensSaved = Math.max(0, grossTokensSaved - overheadTokens)
         recordStats(context.sessionID, tokensSaved)
 
         return ""
@@ -104,6 +113,20 @@ export const plugin: Plugin = async (input) => ({
 })
 
 export default plugin
+
+async function getOverheadTokens(sessionID: string, toolArgs: { indices: number[]; lines?: LineSelector[][] }) {
+  const instructionOverhead = await getInstructionOverheadTokens(sessionID)
+  return estimateTokens(JSON.stringify(toolArgs)) + toolCallOverheadTokens + instructionOverhead
+}
+
+async function getInstructionOverheadTokens(sessionID: string) {
+  if (sessionsWithInstructionOverhead.has(sessionID) || (await hasRecordedStats(sessionID))) {
+    return 0
+  }
+
+  sessionsWithInstructionOverhead.add(sessionID)
+  return estimateTokens(nocreepDescription)
+}
 
 function applyPruneRules(messages: MessageWithParts[]) {
   const sessionID = getSessionID(messages)

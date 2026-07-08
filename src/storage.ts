@@ -81,6 +81,9 @@ export const readStats = async () => ({
   timestamps: await readJsonFile<TimestampStats[]>(timestampsStatsFile, []),
 })
 
+export const hasRecordedStats = async (sessionID: string) =>
+  (await readJsonFile<SessionStats[]>(sessionsStatsFile, [])).some((session) => session.sessionID === sessionID)
+
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4)
 
 const getPrunedCallsFile = (sessionID: string) => path.join(prunedCallsDir, `${encodeURIComponent(sessionID)}.json`)
