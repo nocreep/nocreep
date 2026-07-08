@@ -1,6 +1,6 @@
 # nocreep
 
-nocreep is an opencode tool plugi for pruning previous tool outputs from future model context, avoiding context creep.
+nocreep is an opencode tool plugin for pruning previous tool outputs from future model context, avoiding context creep.
 
 It allows the model to strip or prune the last tool call output(s) right after they return, removing them from the context of future generation.
 
