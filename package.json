@@ -29,7 +29,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "start": "npm run build && node ./dist/cli.js",
+    "stats": "npm run start -- --stats"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.4.0",
