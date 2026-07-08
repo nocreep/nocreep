@@ -1,6 +1,6 @@
 # nocreep
 
-![nocreep](assets/nocreep_logo_wordmark.png)
+![](https://github.com/nocreep/nocreep/blob/main/assets/nocreep_logo_wordmark.png?raw=true)
 
 nocreep is an opencode tool plugin for pruning previous tool outputs from future model context, avoiding context creep.
 
