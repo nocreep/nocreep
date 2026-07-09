@@ -39,12 +39,15 @@ const sessionsWithInstructionOverhead = new Set<string>()
 const toolCallOverheadTokens = 12
 const prunedOutputPlaceholder = "pruned"
 const nocreepDescription =
-  "Prune prior tool outputs from future context. Once you prune output, you will not be able to see it or remember it in future turns. Prune only results and parts of results you will not need. Keep exact evidence, file contents, error text, and command output that you still need for reasoning, citations, edits, or the final answer. Once pruned, the removed output is gone from your future context, so only prune lines you are certain you no longer need. If you made conclusions or reasoning based on parts of the output, keep them. If you need pruned information later, do not try to recover the original one, unless which information you need changed it was stripped by a past version of yourself for a reason. Always use immediately after any tool outputs unless there is absolutely nothing to remove because every line of all those outputs is still needed for future reasoning. After tool calls finish, call nocreep before continuing whenever any output or output line can be discarded. Never just continue after tool outputs unless all of every output must remain in context. Do not leave prior tool outputs in context if any part of them is unnecessary for the next reasoning step. Provide 0-based indices of the completed tool calls from the immediately preceding tool batch, where 0 is the first tool call in that batch by position (the order they were started, not the order they finished). Omit lines, pass an empty lines array, or pass an empty array for a specific index to drop the whole output; otherwise pass one nested line-selector array per index to prune only those lines. Remember: after pruning, you cannot inspect or rely on the removed output again. If one of the outputs just before this was pruned, it was deemed not relevant by a past version of yourself, don't try to recover it. Only if you change topic or which information you're looking for attempt to re-fetch it. Even if you previously lost information, never stop pruning, just do it a bit more conservatively, but still call it consistenly and remove outputs and lines you know you won't need. Often it makes sense to prune a couple of line ranges and not the entire output, only prune the entire output if it is completely unrelated or failed in a non-fixable unrelated way."
+  "Prune prior tool outputs from future context, including when a user message appears between the tool output and the next opportunity to prune it. Once you prune output, you will not be able to see it or remember it in future turns. Prune only results and parts of results you will not need. Keep exact evidence, file contents, error text, and command output that you still need for reasoning, citations, edits, or the final answer. Once pruned, the removed output is gone from your future context, so only prune lines you are certain you no longer need. If you made conclusions or reasoning based on parts of the output, keep them. If you need pruned information later, do not try to recover the original one, unless which information you need changed it was stripped by a past version of yourself for a reason. After tool calls finish, call nocreep as the first tool call of the next tool batch and wait for it to finish before starting any other tool call in that batch whenever any output or output line can be discarded. Do not leave prior tool outputs in context if any part of them is unnecessary for the next reasoning step. Provide 0-based indices of the completed tool calls from the immediately preceding tool batch, where 0 is the first tool call in that batch by position (the order they were started, not the order they finished). Omit lines, pass an empty lines array, or pass an empty array for a specific index to drop the whole output; otherwise pass one nested line-selector array per index to prune only those lines. Remember: after pruning, you cannot inspect or rely on the removed output again. If one of the outputs just before this was pruned, it was deemed not relevant by a past version of yourself, don't try to recover it. Only if you change topic or which information you're looking for attempt to re-fetch it. Even if you previously lost information, never stop pruning, just do it a bit more conservatively, but still call it consistently and remove outputs and lines you know you won't need. Often it makes sense to prune a couple of line ranges and not the entire output, only prune the entire output if it is completely unrelated or failed in a non-fixable unrelated way or is completely irrelevant."
+const toolDescription =
+  "Important: Avoid calling nocreep on its own, don't call it directly after the previous tool call(s) unless you're calling more tools at the same time. If any previous tool output can be discarded, the immediately next tool-call batch must make nocreep the first tool call and include the next useful tool call or calls in that same batch. This includes Glob, Grep, Read, and command outputs even when only part of a multi-tool batch or a seemingly small search result is no longer needed. Do not run reads, searches, commands, or other tool calls first and prune in a later batch. " +
+  nocreepDescription
 
 export const plugin: Plugin = async (input) => ({
   tool: {
     nocreep: tool({
-      description: nocreepDescription,
+      description: toolDescription,
       args: {
         indices: tool.schema
           .array(tool.schema.number().int().min(0))
@@ -61,7 +64,7 @@ export const plugin: Plugin = async (input) => ({
       },
       async execute(args, context) {
         const messages = await getSessionMessages(input.client, context.sessionID, context.directory)
-        const selected = selectCompletedToolParts(messages, args.indices)
+        const selected = selectPrunableToolParts(messages, context.messageID, args.indices)
 
         if (selected.length === 0) {
           return "nocreep: no completed tool calls matched."
@@ -115,7 +118,7 @@ async function getInstructionOverheadTokens(sessionID: string) {
   }
 
   sessionsWithInstructionOverhead.add(sessionID)
-  return estimateTokens(nocreepDescription)
+  return estimateTokens(toolDescription)
 }
 
 function applyPruneRules(messages: MessageWithParts[]) {
@@ -190,13 +193,28 @@ async function getSessionMessages(
   return response.data ?? []
 }
 
-function selectCompletedToolParts(messages: MessageWithParts[], indices: number[]) {
-  const completed =
-    messages.findLast((message) => message.parts.some(isCompletedToolPart))?.parts.filter(isCompletedToolPart) ?? []
+function selectPrunableToolParts(messages: MessageWithParts[], currentMessageID: string, indices: number[]) {
+  const completed = getPreviousPrunableToolBatch(messages, currentMessageID)
   return indices.flatMap((batchIndex, pruneIndex) => {
     const part = completed[batchIndex]
     return part ? [{ ...part, batchIndex, pruneIndex }] : []
   })
+}
+
+function getPreviousPrunableToolBatch(messages: MessageWithParts[], currentMessageID: string) {
+  const currentMessageIndex = messages.findIndex((message) => message.info.id === currentMessageID)
+  if (currentMessageIndex < 1) {
+    return []
+  }
+
+  for (let index = currentMessageIndex - 1; index >= 0; index -= 1) {
+    const previousMessage = messages[index]
+    if (previousMessage.parts.some(isCompletedToolPart)) {
+      return previousMessage.parts.filter(isPrunableCompletedToolPart)
+    }
+  }
+
+  return []
 }
 
 function getLinesForPart(lines: LineSelector[][], part: IndexedCompletedToolPart) {
@@ -254,8 +272,20 @@ function pruneLines(output: string, lines: number[]) {
   return chunks.join("\n")
 }
 
+function isPrunableCompletedToolPart(part: Part): part is CompletedToolPart {
+  return isCompletedToolPart(part) && getToolName(part) !== "nocreep"
+}
+
 function isCompletedToolPart(part: Part): part is CompletedToolPart {
   return part.type === "tool" && part.state.status === "completed"
+}
+
+function getToolName(part: Part) {
+  if (part.type !== "tool" || !("tool" in part) || typeof part.tool !== "string") {
+    return undefined
+  }
+
+  return part.tool
 }
 
 function normalizeLines(selectors: LineSelector[]) {
